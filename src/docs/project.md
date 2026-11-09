@@ -19,7 +19,7 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 
 - `src/notebooks/previsao_curto_prazo_consumo_energia_eletrica.ipynb` is the main notebook. Its markdown is in **Portuguese**.
 - `src/data/energydata_complete.csv` is the raw data.
-- `pyproject.toml` / `uv.lock` are managed with **uv**. Dependencies: numpy, pandas, plotly, scikit-learn, nbformat. PyTorch is not added yet.
+- `pyproject.toml` / `uv.lock` are managed with **uv**. Dependencies: numpy, pandas, plotly, scikit-learn, statsmodels (ACF/PACF, Ljung–Box), torch, nbformat.
 - The virtual environment is `.venv/`, with Python 3.12.
 
 ## Notebook structure (current state)
@@ -63,6 +63,38 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
      | val | 26.85 | 67.60 | 53.29 | 113.80 |
      | test | 26.51 | 66.46 | 46.02 | 101.29 |
 
+4. **Baselines → Autorregressivo** (ARX).
+   - **ACF/PACF of train `appliances`:**
+     - PACF is dominated by lag 1 (0.76) and negligible after about 10 lags.
+     - ACF peaks at lag 144 (24 h, 0.20).
+   - **Helpers:**
+     - `X_full` holds the scaled features on the full contiguous `df`.
+     - `make_lagged(frame, cols, lags)` adds lagged copies.
+     - `build_arx(horizon, p, q, lag24)` returns `{split: (X, y_scaled, index)}`.
+     - `regression_metrics(y_true_wh, y_pred_wh, horizon)` returns MAE, RMSE and MASE.
+   - **Model:**
+     - Direct strategy, one `Ridge` per horizon.
+     - `appliances` lags 0…p−1, exogenous lags 1…q, and an optional 24 h lag `y_{t+h-144}`.
+     - Calendar features at t only.
+     - `dow_6` is dropped from the ARX design (dummy trap with the intercept).
+   - **Grid search on validation MAE:** p ∈ {1,3,6,9,12,18,24}, q ∈ {0,1,3}, lag24 ∈ {F,T}, alpha ∈ 10^-2…10^4.
+     - Best for both horizons: p = 12, q = 0, with the 24 h lag.
+     - Alpha: 100 for `y_10`, 1000 for `y_60`.
+     - Exogenous lags did not help (q = 0 was best), and p > 12 gives a plateau.
+   - **Shared results table:** `results` is a list of dicts with keys modelo, horizonte, conjunto, MAE, RMSE and MASE. Persistence and ARX rows are already in it; **other models should append to it**.
+
+     | Horizon | Model | MAE val | MAE test | RMSE test | MASE test |
+     |---|---|---|---|---|---|
+     | y_10 | ARX | 27.40 | 27.14 | 59.44 | 0.880 |
+     | y_10 | Persistence | 26.85 | 26.51 | 66.46 | 0.860 |
+     | y_60 | ARX | 42.97 | 40.12 | 78.39 | 0.665 |
+     | y_60 | Persistence | 53.29 | 46.02 | 101.29 | 0.763 |
+   - **ARX findings:**
+     - At 10 minutes, the ARX has a better RMSE but a slightly *worse* MAE than persistence. Ridge minimizes squared error, so it predicts the conditional mean. With a skewed, spiky target, the median residual is negative (about −6 Wh for y_10, −12 Wh for y_60): the model over-predicts typical values in order to hedge against spikes.
+     - Ljung–Box rejects white noise for both horizons. For `y_60` some autocorrelation up to lag 5 is expected anyway (overlapping direct forecasts).
+     - Diagnostic plots: residuals over time, residuals vs fitted, residual ACF, and MAE by hour of day vs persistence.
+     - A `_Observações:_` markdown cell is left for Ian's notes.
+
 ## Key observations for the report
 
 - **Distribution shift:** the test period (May) is much warmer than train (January–April). Outside temperature averages 14.5 °C in test vs 5.7 °C in train, and the standardized `kitchen_temp` averages about +2.5 in test. The models must extrapolate, which is material for the "Quando o modelo … falha?" section.
@@ -70,14 +102,17 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
   - The split is chronological with no shuffling.
   - Scalers are fit on train only.
   - Targets are built within each split.
-  - Windows and lags must also be built within each split.
+  - **Convention for lags and windows (all models):**
+    - Build them on the full contiguous series (`X_full`), then select rows by `splits[name].index`.
+    - Val/test rows may use history from the previous split. These are past inputs only, so there is no leakage.
+    - Only the first rows of train are dropped.
+    - As a result, every model is evaluated on exactly the same val/test rows as persistence.
 
 ## Open decisions and next steps
 
-- **Window length L and lags:** the RNN and CNN need windows of length L, and the AR model and MLP need lagged `appliances`. Build them per split; the first L rows of each split lack full history.
-- **Target transform and loss:** `appliances` is heavily skewed. The options discussed were (1) `log1p` before scaling, or (2) keeping the scale and training with MAE/Huber loss instead of MSE. The suggestion was to start with (2) and try (1) as a variant. Ian and Ornella should use the same choice.
-- **Models:** add PyTorch to the dependencies (`uv add torch`), then implement the AR baseline and the GRU.
-- **Evaluation table:** MAE, RMSE and MASE per split and horizon, plus metrics by hour of day (use `splits[name].index.hour`).
+- **Target transform and loss:** `appliances` is heavily skewed. The options discussed were (1) `log1p` before scaling, or (2) keeping the scale and training with MAE/Huber loss instead of MSE. The suggestion was to start with (2) and try (1) as a variant. Ian and Ornella should use the same choice. The ARX result (better RMSE, worse MAE than persistence at 10 min) shows why this matters. An ARX variant fit on a `log1p` target, or with a median/Huber loss, could also be tried.
+- **Models:** implement the GRU (Ian), and the MLP and 1D CNN (Ornella). Window length L is still to be chosen; the PACF and the ARX search suggest roughly 12 steps (2 h), plus 24 h context if possible.
+- **Evaluation table:** append to `results` using `regression_metrics`, and compare MAE by hour of day (`index.hour`).
 
 ## Working notes
 
