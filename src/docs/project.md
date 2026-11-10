@@ -1,6 +1,6 @@
 # Project context: short-term household energy consumption forecasting
 
-_Last updated: 2026-11-03_
+_Last updated: 2026-11-10 (branch `refactor/validacao-temporal`)_
 
 ## Overview
 
@@ -9,113 +9,126 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 - **Task:** forecast appliance energy consumption (`Appliances`, in Wh) at **10-minute and 60-minute horizons**.
 - **Dataset:** UCI *Appliances Energy Prediction* (https://archive.ics.uci.edu/dataset/374/appliances+energy+prediction), file `src/data/energydata_complete.csv` (committed). It has 19,735 rows at 10-minute resolution from 2016-01-11 17:00 to 2016-05-27 18:00, with no gaps and no missing values.
 - **Who does which model:**
-  - Ian: autoregressive baseline (AR with exogenous variables) and a recurrent network (GRU).
-  - Ornella: MLP and 1D CNN.
-  - Everything is trained in **PyTorch**, and both people use the same train/val/test sets.
-- **Evaluation:** MAE, RMSE, MASE (persistence forecast as the reference) and performance by hour of day.
+  - Ian: the ARX baseline and the GRU (main model).
+  - Ornella: the MLP and the 1D CNN.
+  - Everything is trained in **PyTorch** on the same splits.
+- **Evaluation:** MAE, RMSE, MASE (persistence as the reference) and performance by hour of day.
 - **Deliverables:** a reproducible notebook, a data dictionary plus a data-leakage analysis, baseline and deep models, a results table for train/val/test, residual diagnostics, a computational cost summary, a 6–8 page report, a 10–12 minute presentation, and a final section titled "Quando o modelo de aprendizagem profunda falha?".
 
 ## Repository layout
 
 - `src/notebooks/previsao_curto_prazo_consumo_energia_eletrica.ipynb` is the main notebook. Its markdown is in **Portuguese**.
 - `src/data/energydata_complete.csv` is the raw data.
-- `pyproject.toml` / `uv.lock` are managed with **uv**. Dependencies: numpy, pandas, plotly, scikit-learn, statsmodels (ACF/PACF, Ljung–Box), torch, nbformat.
+- `outputs/` (prediction CSVs) and `artifacts/` (scaler `.joblib` files) are written by the notebook and git-ignored.
+- `pyproject.toml` / `uv.lock` are managed with **uv**. Dependencies: numpy, pandas, plotly, scikit-learn, statsmodels, torch, ipykernel, nbformat.
 - The virtual environment is `.venv/`, with Python 3.12.
 
-## Notebook structure (current state)
+## Notebook structure
 
-1. **Imports and loading.** `DATAPATH` resolves to `src/data` when the notebook runs from `src/notebooks`.
-2. **EDA** (plotly). This section still uses the **original column names** (`T1`, `RH_6`, `T_out`, …), because Ian's written observations refer to them.
-   - `date` is converted to datetime and used as the index (the column is kept too, with `drop=False`).
-   - Plots: appliances and lights over time (raw and daily mean), hour-of-day profile and day × hour heatmap, a histogram, temperature and humidity per room (hourly lines plus box plots via `plot_rooms`), outside conditions (`T_out`/`RH_out` vs `T6`/`RH_6`), the house mean temperature minus `T_out`, and a correlation matrix.
+0. **Optional Colab setup cell.** On Colab only, it clones the repo (branch in `REPO_BRANCH`), changes into `src/notebooks` and installs missing dependencies. Locally it does nothing.
+1. **Imports and loading.** All imports are in the first cell. `DATAPATH` resolves to `src/data` when the notebook runs from `src/notebooks`.
+2. **EDA** (plotly). This section uses the **original column names** (`T1`, `RH_6`, `T_out`, …), because Ian's written observations refer to them.
    - Ian's findings:
-     - Consumption is strongly right-skewed with outliers.
-     - Consumption peaks around 18:00 every day.
-     - Mondays and Fridays have higher afternoon consumption (possibly home-office days).
-     - The bathroom is the most humid room and the ironing room the driest.
-     - The house is on average about 13 °C warmer than outside.
+     - Consumption is strongly right-skewed and peaks around 18:00.
+     - Mondays and Fridays have higher afternoon use.
+     - The bathroom is the most humid room.
+     - The house is about 13 °C warmer than outside.
      - `RH_6` correlates negatively with indoor temperatures.
-3. **Preprocessing.**
-   - **Column renaming** (`COLUMN_NAMES`). The pattern is `<room>_temp` / `<room>_hum` (kitchen, living_room, laundry, office, bathroom, ironing_room, teen_room, parents_room), `outside_north_*` (T6/RH_6) and `weather_*` (Chièvres station: temp, hum, pressure, windspeed, visibility, dewpoint). `Appliances` becomes `appliances`.
-   - **Dropped columns:** `rv1` and `rv2`. These are random noise added on purpose, and they are identical to each other.
-   - **Added time features:** `hour_sin` and `hour_cos` (cyclic minute-of-day), and `dow_0` to `dow_6` (one-hot day of week, 0 = Monday).
-   - **Targets:** `y_10` is `appliances` shifted −1 step and `y_60` is `appliances` shifted −6 steps (`HORIZONS`). Targets are built **inside each split**, so the last 6 rows of each split are dropped and no target crosses into the next split.
-   - **Split:** chronological, **70/15/15**, with cuts rounded to midnight (`TRAIN_FRAC`, `VAL_FRAC`).
+3. **Preprocessing (shared by all models).**
+   - **Renaming:** `COLUMN_NAMES`, with `<room>_temp` / `<room>_hum`, `outside_north_*` and `weather_*`.
+   - **Dropped columns:** `rv1` / `rv2`.
+   - **Time features:** `hour_sin` / `hour_cos` and `dow_0..6`.
+   - **Weather leak fix:** the dataset linearly interpolates the hourly `weather_*` readings to 10 minutes, so the value at 17:10 already contains part of the 18:00 reading. All `weather_*` columns use the **last full-hour value** (forward fill). Ornella spotted this.
+   - **Targets and split:** `y_10` / `y_60` are built inside each split (`make_targets`), and the chronological 70/15/15 split is cut at midnight.
 
      | Split | Dates | Rows |
      |---|---|---|
-     | train | 2016-01-11 → 2016-04-15 (96 days) | 13,716 |
-     | val | 2016-04-16 → 2016-05-06 (21 days) | 3,018 |
-     | test | 2016-05-07 → 2016-05-27 (21 days) | 2,983 |
+     | train | 2016-01-11 → 2016-04-15 | 13,716 |
+     | val | 2016-04-16 → 2016-05-06 | 3,018 |
+     | test | 2016-05-07 → 2016-05-27 | 2,983 |
+   - **Standardization:** `standardize(frame, train_index)` uses a StandardScaler on the continuous columns, fit on the given training rows. Each network fits its own scaler on training rows.
+   - **Representations of the 21 temperature/humidity columns:** `apply_representation(frame, 'niveis' | 'variacoes')`. `variacoes` replaces each column with its 10-minute change, 60-minute change and deviation from the past-24 h mean.
+   - **Shared evaluation:**
+     - `regression_metrics` computes MAE, RMSE and MASE, where MASE uses `MASE_SCALE` = training-set persistence MAE (30.83 / 60.29 Wh).
+     - `long_predictions` builds a long table, and the dict `PREDICTIONS[(model, round)]` holds one table per model and round.
+     - `predictions_table`, `metrics_by_seed` and `summarize_seeds` filter and summarize it.
+     - `export_predictions` and `export_scaler` write the files.
+     - Plot and diagnostic helpers: `plot_metric_bars`, `plot_by_hour`, `mean_bias`, `residual_diagnostics` (residual ACF + Ljung–Box on spaced origins), `plot_residuals_vs_fitted`, `cost_summary`.
+     - Model keys and labels are in `MODEL_LABELS` / `MODEL_COLORS`, including variants such as `mlp_res` and `cnn_1d_res_lag24`.
+   - **Convention for lags and windows (all models):** build them on the full contiguous series, then select each split's rows. Val/test rows may use history from the previous split, so every model is scored on exactly the same val/test rows.
+4. **ARX.**
+   - ACF/PACF on train.
+   - **Helpers:** `arx_inputs(representation, train_index)`, `build_arx(inputs, parts, horizon, p, q, lag24)`, `arx_grid`, `best_arx`, `fit_arx`, `plot_arx_search`.
+   - Ridge is fit directly in Wh. Its predictions don't depend on the target's scale, so this is equivalent to fitting on a standardized target.
+   - **Best configuration (unchanged):** p = 12, q = 0, with the 24 h lag; alpha 100 for 10 min and 1000 for 60 min.
+5. **MLP and CNN 1D (Ornella's models, refactored).**
+   - **Inputs:**
+     - `build_features(frame, L, representation, lag24)`;
+     - `prepare_mlp(L, representation, parts, lag24, residual)`;
+     - `prepare_cnn(...)`, which uses the same origins as the MLP.
+     - With the default options, the inputs are **bit-identical** to Ornella's original code.
+   - **Generic network helpers:**
+     - `train_network`: tuple inputs, per-epoch history in `model.history_`, `loss='huber'|'l1'`, `grad_clip`, `device`, `model_factory(inputs, n_out, **kwargs)`;
+     - `ResidualOutput`, `predict_raw` / `predict_wh`;
+     - `nn_predictions(..., output_steps)`, `network_grid`, `best_config`, `train_seeds`, `seed_predictions`, `plot_learning_curves`.
+   - **Round-1 configurations:** MLP L = 12, hidden 128, dropout 0.2, lr 1e-3; CNN L = 6, lr 3e-4. Both use Huber loss on `log1p`, with 6 outputs (t+1 … t+6).
+6. **Round-1 comparison.** Metrics, hourly MAE/bias, residual diagnostics and cost.
+7. **"Mudança de distribuição e representação das variáveis" (forward-chaining study).**
+   - **Evidence on train only:** KPSS rejects stationarity for all 21 level series and none of their changes.
+   - **Folds:** 3 expanding-window folds with 21-day blocks (Mar 5–25, Mar 26–Apr 15, Apr 16–May 6).
+     - The scaler is refit per fold.
+     - Networks early-stop on the last 7 days of fold training (`early_stopping_split`).
+     - Fold blocks never reach the test period.
+   - **Pre-registered rule:** lowest mean MASE (folds, horizons, ARX + MLP). It chose **`niveis`** (0.906 vs 1.174), so the change-based representation **did not validate**.
+   - Inside train + val the shift is mild (5–10% of level values out of the fold's training range), so the folds give little reward for robustness to shift.
+8. **Round 2 (audit fixes).**
+   - **Variants:** residual head (`residual`) × 24 h lag (`lag24`) for the MLP and CNN, chosen by the same folds and rule.
+     - Chosen: **`mlp_res`** (fold MASE 0.770 against 0.971 for the base) and **`cnn_1d_res`** (0.792 against 1.454).
+     - The 24 h lag doesn't help.
+     - All variants are trained with 5 seeds on the official split and kept in `PREDICTIONS` with round = 2.
+   - **ARX + MLP on out-of-sample ARX residuals:**
+     - Training residuals come from monthly expanding-window ARX refits (`arx_oos_predictions`, `prepare_arx_residuals`, `arx_mlp_predictions`).
+     - It uses L1 loss with residuals scaled by their training std.
+     - Fold MASE 0.831 vs 0.841 for the ARX alone, so it counts as useful under the rule.
+9. **GRU (main model).** See the open items.
+   - **Inputs:** `prepare_gru(L, representation, parts, output_steps)` builds windows `(n, L, 30)`, a vector with the target-time calendar sin/cos, and `log1p(y_t)`.
+   - **Model:** `RecurrentForecaster` (GRU or LSTM; unidirectional, stateless, last hidden state concatenated with the vector) inside a `ResidualOutput`, built by `build_recurrent_model`.
+   - **Training:** L1 loss, gradient clipping 1.0, AdamW, `DEVICE` = cuda/mps/cpu with cuDNN set to deterministic.
+   - **Grid:** set by `GRU_LOOKBACKS` (36, 72, 144), `GRU_HIDDEN` (32, 64, 128), `GRU_LAYERS` (1, 2) and `GRU_DROPOUT` (0.1, 0.2).
+   - **Then:** shared vs separate models per horizon (`GRU_SHARED_MODEL`), 5 seeds, and an LSTM ablation (`train_recurrent`).
+10. **Final comparison** (both rounds) and **"Quando o modelo de aprendizagem profunda falha?"**
 
-     70/15/15 was chosen over 70/10/20 because a 2-week validation set is noisy (weekly mean consumption ranges from about 75 to about 120 Wh).
-   - **Data structures:** `splits[name]` holds the unscaled DataFrames, indexed by date. They are kept for the dates, for the persistence metrics and for evaluation by hour of day.
-   - **Standardization (sklearn):**
-     - `x_scaler` is a `ColumnTransformer(StandardScaler on SCALE_COLS, remainder='passthrough')`, fit on train only.
-     - `y_scaler` is a `StandardScaler` fit on train `appliances`. The helpers `scale_y` / `unscale_y` work on targets of shape `(n, k)`.
-   - **Model inputs:** `X[name]` (n × 35) and `y[name]` (n × 2, columns `TARGETS = ['y_10', 'y_60']`) are **numpy float32** arrays, ready for `torch.from_numpy`. The column order of `X` is `FEATURE_NAMES`.
-   - **No files are saved.** The splits are deterministic and cheap, so they are rebuilt by running the notebook.
-   - **Persistence baseline** (`persistence_metrics`, `MASE_SCALE` = train persistence MAE per horizon), in Wh:
+## Results (test MAE, Wh; mean ± std over 5 seeds for networks; local CPU run)
 
-     | Split | MAE y_10 | RMSE y_10 | MAE y_60 | RMSE y_60 |
-     |---|---|---|---|---|
-     | train | 30.83 | 74.12 | 60.29 | 123.95 |
-     | val | 26.85 | 67.60 | 53.29 | 113.80 |
-     | test | 26.51 | 66.46 | 46.02 | 101.29 |
+| Model | 10 min | 60 min | RMSE 10 / 60 |
+|---|---|---|---|
+| Persistence | 26.51 | 46.02 | 66.5 / 101.3 |
+| ARX | 27.08 | 40.27 | 59.4 / 78.4 |
+| MLP, round 1 | 36.53 ± 3.28 | 52.38 ± 5.59 | 66.1 / 86.4 |
+| CNN 1D, round 1 | 83.78 ± 18.53 | 91.37 ± 11.91 | 122.6 / 130.6 |
+| **MLP (residual)** | **24.19 ± 0.16** | **35.35 ± 0.83** | 60.1 / 81.1 |
+| CNN 1D (residual) | 24.95 ± 0.24 | 37.42 ± 0.58 | 60.8 / 82.6 |
+| ARX + MLP | 24.55 ± 0.40 | 35.55 ± 0.75 | 59.3 / 81.7 |
 
-4. **Baselines → Autorregressivo** (ARX).
-   - **ACF/PACF of train `appliances`:**
-     - PACF is dominated by lag 1 (0.76) and negligible after about 10 lags.
-     - ACF peaks at lag 144 (24 h, 0.20).
-   - **Helpers:**
-     - `X_full` holds the scaled features on the full contiguous `df`.
-     - `make_lagged(frame, cols, lags)` adds lagged copies.
-     - `build_arx(horizon, p, q, lag24)` returns `{split: (X, y_scaled, index)}`.
-     - `regression_metrics(y_true_wh, y_pred_wh, horizon)` returns MAE, RMSE and MASE.
-   - **Model:**
-     - Direct strategy, one `Ridge` per horizon.
-     - `appliances` lags 0…p−1, exogenous lags 1…q, and an optional 24 h lag `y_{t+h-144}`.
-     - Calendar features at t only.
-     - `dow_6` is dropped from the ARX design (dummy trap with the intercept).
-   - **Grid search on validation MAE:** p ∈ {1,3,6,9,12,18,24}, q ∈ {0,1,3}, lag24 ∈ {F,T}, alpha ∈ 10^-2…10^4.
-     - Best for both horizons: p = 12, q = 0, with the 24 h lag.
-     - Alpha: 100 for `y_10`, 1000 for `y_60`.
-     - Exogenous lags did not help (q = 0 was best), and p > 12 gives a plateau.
-   - **Shared results table:** `results` is a list of dicts with keys modelo, horizonte, conjunto, MAE, RMSE and MASE. Persistence and ARX rows are already in it; **other models should append to it**.
+- **Round 1:** the networks matched or beat the ARX on validation, but failed on test because of **covariate shift**. May is much warmer than training, the networks extrapolate the consumption level, and the seeds diverge.
+- **Residual head:** it neutralizes this. Residual-model test MAE is close to its validation MAE (MLP residual val 24.6 / 37.6).
+- **Remaining failure: spikes.**
+  - Readings above 300 Wh are about 4% of the test set. On those, the residual MLP's MAE at 60 min is 320 Wh, against 296 for the ARX.
+  - On readings up to 300 Wh it's 22.4, against 28.6 for the ARX.
+  - The worst hours are 17–18 h. The residual nets underpredict on average (bias +6 / +12 Wh).
+- **Hardware:** Ornella's original MLP numbers (37.5 ± 2.5 at 10 min) differ slightly from this run. The inputs are proven identical, so the difference comes from CPU hardware.
 
-     | Horizon | Model | MAE val | MAE test | RMSE test | MASE test |
-     |---|---|---|---|---|---|
-     | y_10 | ARX | 27.40 | 27.14 | 59.44 | 0.880 |
-     | y_10 | Persistence | 26.85 | 26.51 | 66.46 | 0.860 |
-     | y_60 | ARX | 42.97 | 40.12 | 78.39 | 0.665 |
-     | y_60 | Persistence | 53.29 | 46.02 | 101.29 | 0.763 |
-   - **ARX findings:**
-     - At 10 minutes, the ARX has a better RMSE but a slightly *worse* MAE than persistence. Ridge minimizes squared error, so it predicts the conditional mean. With a skewed, spiky target, the median residual is negative (about −6 Wh for y_10, −12 Wh for y_60): the model over-predicts typical values in order to hedge against spikes.
-     - Ljung–Box rejects white noise for both horizons. For `y_60` some autocorrelation up to lag 5 is expected anyway (overlapping direct forecasts).
-     - Diagnostic plots: residuals over time, residuals vs fitted, residual ACF, and MAE by hour of day vs persistence.
-     - A `_Observações:_` markdown cell is left for Ian's notes.
+## Open items
 
-## Key observations for the report
-
-- **Distribution shift:** the test period (May) is much warmer than train (January–April). Outside temperature averages 14.5 °C in test vs 5.7 °C in train, and the standardized `kitchen_temp` averages about +2.5 in test. The models must extrapolate, which is material for the "Quando o modelo … falha?" section.
-- **Possible leakage, already handled:**
-  - The split is chronological with no shuffling.
-  - Scalers are fit on train only.
-  - Targets are built within each split.
-  - **Convention for lags and windows (all models):**
-    - Build them on the full contiguous series (`X_full`), then select rows by `splits[name].index`.
-    - Val/test rows may use history from the previous split. These are past inputs only, so there is no leakage.
-    - Only the first rows of train are dropped.
-    - As a result, every model is evaluated on exactly the same val/test rows as persistence.
-
-## Open decisions and next steps
-
-- **Target transform and loss:** `appliances` is heavily skewed. The options discussed were (1) `log1p` before scaling, or (2) keeping the scale and training with MAE/Huber loss instead of MSE. The suggestion was to start with (2) and try (1) as a variant. Ian and Ornella should use the same choice. The ARX result (better RMSE, worse MAE than persistence at 10 min) shows why this matters. An ARX variant fit on a `log1p` target, or with a median/Huber loss, could also be tried.
-- **Models:** implement the GRU (Ian), and the MLP and 1D CNN (Ornella). Window length L is still to be chosen; the PACF and the ARX search suggest roughly 12 steps (2 h), plus 24 h context if possible.
-- **Evaluation table:** append to `results` using `regression_metrics`, and compare MAE by hour of day (`index.hour`).
+- **Run the full GRU/LSTM search on Colab** (GPU). Locally only a tiny smoke grid has run. The "Resultados da GRU" markdown cell and the GRU rows of the final comparison are to be written from that run.
+- Possible next steps:
+  - a transformer with matched inputs, lookback, splits and parameter count (`prepare_gru` and the parameter counts can be reused);
+  - something targeting the spikes (e.g. a quantile loss);
+  - re-running the full notebook end-to-end on Colab for a single consistent set of outputs.
 
 ## Working notes
 
-- The repo lives on the Windows drive (`/mnt/c/...`) and is opened in VS Code through WSL. When the notebook is edited from outside VS Code, the open tab does **not** refresh, and even "Revert File" doesn't help. The fix is to close the tab **without saving** and reopen it, or run "Developer: Reload Window". Saving the stale tab would overwrite the external edits.
-- Before editing the notebook, check its modification time and current cell contents, because Ian may have run or edited it in the meantime.
-- The notebook outputs contain plotly figures, so the file is about 17 MB.
+- **The notebook is generated** from builder scripts in the session scratchpad (`build2.py`, `v2_*.py`, `results_text.py`). It's the committed file that counts; edit the notebook directly from now on.
+- The repo lives on the Windows drive (`/mnt/c/...`) and is opened in VS Code through WSL. When the notebook is edited from outside VS Code, the open tab does **not** refresh, and even "Revert File" doesn't help. Close the tab **without saving** and reopen it, or run "Developer: Reload Window". Saving the stale tab would overwrite the external edits.
+- Before editing the notebook, check its modification time and current cell contents.
+- **Runtime of a full run on this 2-core CPU:** about 31 minutes without the full GRU search.
