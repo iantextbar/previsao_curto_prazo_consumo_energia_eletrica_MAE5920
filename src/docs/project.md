@@ -1,6 +1,6 @@
 # Project context: short-term household energy consumption forecasting
 
-_Last updated: 2026-11-10 (branch `refactor/validacao-temporal`)_
+_Last updated: 2026-11-11 (branch `refactor/validacao-temporal`)_
 
 ## Overview
 
@@ -90,15 +90,23 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
      - Training residuals come from monthly expanding-window ARX refits (`arx_oos_predictions`, `prepare_arx_residuals`, `arx_mlp_predictions`).
      - It uses L1 loss with residuals scaled by their training std.
      - Fold MASE 0.831 vs 0.841 for the ARX alone, so it counts as useful under the rule.
-9. **GRU (main model).** See the open items.
+9. **GRU (main model).** Done; the full search ran on Colab (GPU).
    - **Inputs:** `prepare_gru(L, representation, parts, output_steps)` builds windows `(n, L, 30)`, a vector with the target-time calendar sin/cos, and `log1p(y_t)`.
    - **Model:** `RecurrentForecaster` (GRU or LSTM; unidirectional, stateless, last hidden state concatenated with the vector) inside a `ResidualOutput`, built by `build_recurrent_model`.
    - **Training:** L1 loss, gradient clipping 1.0, AdamW, `DEVICE` = cuda/mps/cpu with cuDNN set to deterministic.
    - **Grid:** set by `GRU_LOOKBACKS` (36, 72, 144), `GRU_HIDDEN` (32, 64, 128), `GRU_LAYERS` (1, 2) and `GRU_DROPOUT` (0.1, 0.2).
    - **Then:** shared vs separate models per horizon (`GRU_SHARED_MODEL`), 5 seeds, and an LSTM ablation (`train_recurrent`).
-10. **Final comparison** (both rounds) and **"Quando o modelo de aprendizagem profunda falha?"**
+   - **Chosen:** L = 72, hidden 128, 2 layers, dropout 0.1 (best epoch 9); 160,786 parameters. The grid is insensitive: the top 10 of 36 configurations are within 0.5 Wh of mean validation MAE (29.8–30.3), 8 of them with 2 layers; L = 144 appears once. Shared model kept (29.81 vs 29.83 Wh for separate models).
+10. **Final comparison** (both rounds).
+11. **"Extra exploratório: Chronos-2 (zero-shot e LoRA)"** — not part of the main comparison. Uses `chronos-forecasting>=2.3` + `peft` directly (no AutoGluon): `Chronos2Pipeline.predict_df` for zero-shot and `Chronos2Pipeline.fit(..., finetune_mode='lora')` for LoRA. Guarded by `CHRONOS_AVAILABLE` (skipped when the libraries are missing) and `CHRONOS_SMOKE`.
+    - Target in raw Wh; known-future covariates = `TIME_COLS` (hour/dow sin-cos); past-only = lights, sensors, hourly-ffilled weather. One item per forecast origin (same origins as all models), `cross_learning=False`.
+    - Variants (`rodada=3` in `PREDICTIONS`): `chronos2_zs72`, `chronos2_zs1008` (zero-shot, 12 h and 7 d of context), `chronos2_lora` (7 d, lr chosen on validation WQL between 1e-5 and 1e-4, 1000 steps, batch 256 series), `chronos2_oracle` (zero-shot with future weather, labeled as an unrealistic upper bound).
+    - Fine-tuning validation = one item per validation origin, scored on its next 6 steps (checkpoint every 100 steps, best `eval_loss`). Adapters are saved under `CHRONOS_ROOT` (= `artifacts/chronos2`, or a Drive folder on Colab).
+    - Metrics: MAE/RMSE/MASE of the median plus 80 % coverage, interval width and WQL (`quantile_metrics`); quantiles exported to `outputs/quantis_<key>_rodada3.csv`.
+    - Contamination check (2026-11-11): not in `autogluon/chronos_datasets` nor in GIFT-Eval pretrain (Table 14 of the GIFT-Eval paper).
+12. **"Quando o modelo de aprendizagem profunda falha?"** — includes a code cell (`spike_breakdown`) with the MAE on readings ≤ 300 / > 300 Wh and the two worst hours per model, for the final models plus the Chronos-2 variants.
 
-## Results (test MAE, Wh; mean ± std over 5 seeds for networks; local CPU run)
+## Results (test MAE, Wh; mean ± std over 5 seeds for networks; one Colab run — GRU/LSTM on GPU, the rest on CPU with numbers identical to the local run)
 
 | Model | 10 min | 60 min | RMSE 10 / 60 |
 |---|---|---|---|
@@ -109,9 +117,12 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 | **MLP (residual)** | **24.19 ± 0.16** | **35.35 ± 0.83** | 60.1 / 81.1 |
 | CNN 1D (residual) | 24.95 ± 0.24 | 37.42 ± 0.58 | 60.8 / 82.6 |
 | ARX + MLP | 24.55 ± 0.40 | 35.55 ± 0.75 | 59.3 / 81.7 |
+| **GRU** (L = 72, 128 × 2, dropout 0.1) | **23.59 ± 0.30** | **34.88 ± 0.64** | 60.5 / 81.6 |
+| LSTM (same config) | 24.21 ± 0.13 | 35.79 ± 0.94 | 61.1 / 83.6 |
 
 - **Round 1:** the networks matched or beat the ARX on validation, but failed on test because of **covariate shift**. May is much warmer than training, the networks extrapolate the consumption level, and the seeds diverge.
-- **Residual head:** it neutralizes this. Residual-model test MAE is close to its validation MAE (MLP residual val 24.6 / 37.6).
+- **Residual head:** it neutralizes this. Residual-model test MAE is close to its validation MAE (MLP residual val 24.6 / 37.6; GRU val 24.2 / 36.3).
+- **GRU:** best at both horizons, but by 0.6 / 0.5 Wh over the MLP (residual) — about 2 SDs at 10 min, within 1 SD at 60 min. Most of the gain comes from the residual head, not the architecture. Bias +6.2 / +14.7 Wh like the other residual nets; RMSE does not beat the ARX. Cost: 8.9 s training on GPU, 13.7 ms inference vs 0.9 ms for the MLP.
 - **Remaining failure: spikes.**
   - Readings above 300 Wh are about 4% of the test set. On those, the residual MLP's MAE at 60 min is 320 Wh, against 296 for the ARX.
   - On readings up to 300 Wh it's 22.4, against 28.6 for the ARX.
@@ -120,15 +131,14 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 
 ## Open items
 
-- **Run the full GRU/LSTM search on Colab** (GPU). Locally only a tiny smoke grid has run. The "Resultados da GRU" markdown cell and the GRU rows of the final comparison are to be written from that run.
-- Possible next steps:
-  - a transformer with matched inputs, lookback, splits and parameter count (`prepare_gru` and the parameter counts can be reused);
-  - something targeting the spikes (e.g. a quantile loss);
-  - re-running the full notebook end-to-end on Colab for a single consistent set of outputs.
+- **Re-run the whole notebook on Colab (GPU)** with the Chronos-2 section. Afterwards, write from the outputs: the GRU sentence in item 4 of "Quando falha" (spike table), the "Resultados e conclusões do extra" cell of the Chronos-2 section, item 5 of "Quando falha" (Chronos-2 on spikes), and the Chronos-2 numbers here.
+- The Colab `outputs/` CSVs are git-ignored, so `git add .` from Colab does not bring them back; the executed notebook does carry the printed tables.
+- Possible next steps: something targeting the spikes (e.g. a quantile loss on the GRU, now that Chronos-2 gives quantiles for comparison).
 
 ## Working notes
 
-- **The notebook is generated** from builder scripts in the session scratchpad (`build2.py`, `v2_*.py`, `results_text.py`). It's the committed file that counts; edit the notebook directly from now on.
+- **The notebook carries the Colab outputs** (15 MB). Edit cells in place with a small nbformat/json script that matches cells by their first line and keeps every other cell's outputs; never rebuild it. Ian also edits it in VS Code (he added a Colab badge and git cells at the end), so check the mtime right before writing.
+- **Headless smoke run:** `run_nb.py NOTEBOOK --smoke --name <real notebook path>` executes the code cells in one namespace with textual patches that shrink grids, epochs and seeds (`SMOKE_PATCHES`) and set `CHRONOS_SMOKE = True`. The Chronos-2 cells need a venv with `chronos-forecasting` and `peft` (a throwaway one lives in the session scratchpad; the uv env does not have them, so locally those cells are skipped).
 - The repo lives on the Windows drive (`/mnt/c/...`) and is opened in VS Code through WSL. When the notebook is edited from outside VS Code, the open tab does **not** refresh, and even "Revert File" doesn't help. Close the tab **without saving** and reopen it, or run "Developer: Reload Window". Saving the stale tab would overwrite the external edits.
 - Before editing the notebook, check its modification time and current cell contents.
 - **Runtime of a full run on this 2-core CPU:** about 31 minutes without the full GRU search.
