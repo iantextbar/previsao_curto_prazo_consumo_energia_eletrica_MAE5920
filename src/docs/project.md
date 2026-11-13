@@ -1,6 +1,6 @@
 # Project context: short-term household energy consumption forecasting
 
-_Last updated: 2026-11-11 (branch `refactor/validacao-temporal`)_
+_Last updated: 2026-11-12 (branch `refactor/validacao-temporal`)_
 
 ## Overview
 
@@ -20,6 +20,11 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 - `src/notebooks/previsao_curto_prazo_consumo_energia_eletrica.ipynb` is the main notebook. Its markdown is in **Portuguese**.
 - `src/data/energydata_complete.csv` is the raw data.
 - `outputs/` (prediction CSVs) and `artifacts/` (scaler `.joblib` files) are written by the notebook and git-ignored.
+- `src/report/` holds the report (Portuguese, LaTeX master):
+  - `relatorio.tex` and `refs.bib` are the source;
+  - `build_assets.py` writes `figures/` and `tables/` (`uv run --with matplotlib python src/report/build_assets.py`). Table numbers are copied from the notebook's printed outputs (the `PRINTED` dict). A CSV is used only if it reproduces the printed test MAE.
+  - `build_docx.py` regenerates `relatorio.docx` from the `.tex` (`uv run --with pypandoc_binary python src/report/build_docx.py`).
+  - Never edit the `.docx` directly.
 - `pyproject.toml` / `uv.lock` are managed with **uv**. Dependencies: numpy, pandas, plotly, scikit-learn, statsmodels, torch, ipykernel, nbformat.
 - The virtual environment is `.venv/`, with Python 3.12.
 
@@ -96,7 +101,8 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
    - **Training:** L1 loss, gradient clipping 1.0, AdamW, `DEVICE` = cuda/mps/cpu with cuDNN set to deterministic.
    - **Grid:** set by `GRU_LOOKBACKS` (36, 72, 144), `GRU_HIDDEN` (32, 64, 128), `GRU_LAYERS` (1, 2) and `GRU_DROPOUT` (0.1, 0.2).
    - **Then:** shared vs separate models per horizon (`GRU_SHARED_MODEL`), 5 seeds, and an LSTM ablation (`train_recurrent`).
-   - **Chosen:** L = 72, hidden 128, 2 layers, dropout 0.1 (best epoch 9); 160,786 parameters. The grid is insensitive: the top 10 of 36 configurations are within 0.5 Wh of mean validation MAE (29.8–30.3), 8 of them with 2 layers; L = 144 appears once. Shared model kept (29.81 vs 29.83 Wh for separate models).
+   - **Chosen:** L = 72, hidden 128, 2 layers, dropout 0.1 (best epoch 9); 160,786 parameters. The grid is insensitive: the top 10 of 36 configurations are within 0.5 Wh of mean validation MAE (29.8–30.3), 8 of them with 2 layers; lookbacks 6–24 h are mixed in the list. Shared model kept (29.81 vs 30.09 Wh for separate models).
+   - **GPU run-to-run variation:** two Colab runs gave GRU test MAE 23.59 / 34.88 and 23.70 / 35.03 despite `cudnn.deterministic`; smaller than the seed spread. The notebook holds the second run.
 10. **Final comparison** (both rounds).
 11. **"Extra exploratório: Chronos-2 (zero-shot e LoRA)"** — not part of the main comparison. Uses `chronos-forecasting>=2.3` + `peft` directly (no AutoGluon): `Chronos2Pipeline.predict_df` for zero-shot and `Chronos2Pipeline.fit(..., finetune_mode='lora')` for LoRA. Guarded by `CHRONOS_AVAILABLE` (skipped when the libraries are missing) and `CHRONOS_SMOKE`.
     - Target in raw Wh; known-future covariates = `TIME_COLS` (hour/dow sin-cos); past-only = lights, sensors, hourly-ffilled weather. One item per forecast origin (same origins as all models), `cross_learning=False`.
@@ -104,6 +110,7 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
     - Fine-tuning validation = one item per validation origin, scored on its next 6 steps (checkpoint every 100 steps, best `eval_loss`). Adapters are saved under `CHRONOS_ROOT` (= `artifacts/chronos2`, or a Drive folder on Colab).
     - Metrics: MAE/RMSE/MASE of the median plus 80 % coverage, interval width and WQL (`quantile_metrics`); quantiles exported to `outputs/quantis_<key>_rodada3.csv`.
     - Contamination check (2026-11-11): not in `autogluon/chronos_datasets` nor in GIFT-Eval pretrain (Table 14 of the GIFT-Eval paper).
+    - Colab needed `torchao>=0.17` for `peft`; Ian prepended that upgrade to the LoRA cell. Fine-tuning took ~51 min per learning rate; zero-shot inference over the 2,983 test origins ~280 s with 7 d of context.
 12. **"Quando o modelo de aprendizagem profunda falha?"** — includes a code cell (`spike_breakdown`) with the MAE on readings ≤ 300 / > 300 Wh and the two worst hours per model, for the final models plus the Chronos-2 variants.
 
 ## Results (test MAE, Wh; mean ± std over 5 seeds for networks; one Colab run — GRU/LSTM on GPU, the rest on CPU with numbers identical to the local run)
@@ -117,22 +124,38 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
 | **MLP (residual)** | **24.19 ± 0.16** | **35.35 ± 0.83** | 60.1 / 81.1 |
 | CNN 1D (residual) | 24.95 ± 0.24 | 37.42 ± 0.58 | 60.8 / 82.6 |
 | ARX + MLP | 24.55 ± 0.40 | 35.55 ± 0.75 | 59.3 / 81.7 |
-| **GRU** (L = 72, 128 × 2, dropout 0.1) | **23.59 ± 0.30** | **34.88 ± 0.64** | 60.5 / 81.6 |
-| LSTM (same config) | 24.21 ± 0.13 | 35.79 ± 0.94 | 61.1 / 83.6 |
+| **GRU** (L = 72, 128 × 2, dropout 0.1) | **23.70 ± 0.30** | **35.03 ± 0.83** | 60.6 / 81.1 |
+| LSTM (same config) | 24.25 ± 0.13 | 35.40 ± 1.16 | 61.1 / 83.7 |
+
+Extra (single run, not part of the main comparison):
+
+| Chronos-2 variant | 10 min | 60 min | RMSE 10 / 60 | 80 % coverage 10 / 60 | WQL 10 / 60 |
+|---|---|---|---|---|---|
+| zero-shot, 12 h context | 26.51 | 41.10 | 67.7 / 88.0 | 0.78 / 0.76 | 0.231 / 0.365 |
+| zero-shot, 7 d context | 23.99 | 34.47 | 62.2 / 82.8 | 0.76 / 0.78 | 0.209 / 0.302 |
+| **LoRA, 7 d (lr 1e-4, chosen on val WQL)** | **23.61** | **33.27** | 61.7 / 82.3 | 0.79 / 0.79 | 0.204 / 0.287 |
+| zero-shot, 7 d + future weather (oracle) | 24.18 | 34.46 | 62.8 / 82.8 | 0.77 / 0.78 | 0.210 / 0.302 |
 
 - **Round 1:** the networks matched or beat the ARX on validation, but failed on test because of **covariate shift**. May is much warmer than training, the networks extrapolate the consumption level, and the seeds diverge.
 - **Residual head:** it neutralizes this. Residual-model test MAE is close to its validation MAE (MLP residual val 24.6 / 37.6; GRU val 24.2 / 36.3).
-- **GRU:** best at both horizons, but by 0.6 / 0.5 Wh over the MLP (residual) — about 2 SDs at 10 min, within 1 SD at 60 min. Most of the gain comes from the residual head, not the architecture. Bias +6.2 / +14.7 Wh like the other residual nets; RMSE does not beat the ARX. Cost: 8.9 s training on GPU, 13.7 ms inference vs 0.9 ms for the MLP.
-- **Remaining failure: spikes.**
-  - Readings above 300 Wh are about 4% of the test set. On those, the residual MLP's MAE at 60 min is 320 Wh, against 296 for the ARX.
-  - On readings up to 300 Wh it's 22.4, against 28.6 for the ARX.
-  - The worst hours are 17–18 h. The residual nets underpredict on average (bias +6 / +12 Wh).
+- **GRU:** best of the main comparison at both horizons, but by 0.5 / 0.3 Wh over the MLP (residual) — about 1.5 SDs at 10 min, under 0.5 SD at 60 min. Most of the gain comes from the residual head, not the architecture. Bias +5.8 / +12.5 Wh like the other residual nets; RMSE does not beat the ARX. Cost: 10 s training on GPU, 23 ms inference vs 1 ms for the MLP.
+- **Chronos-2 (extra):** 12 h of context ≈ persistence; 7 d of context zero-shot ≈ GRU level with no training on this house (context length matters more than anything: −2.5 / −6.6 Wh from 12 h to 7 d). LoRA (lr 1e-4; val eval-loss fell monotonically 0.0462 → 0.0448, no overfitting) gives −0.4 / −1.2 Wh over zero-shot and the lowest MAE in the notebook at 60 min (33.3, 1.8 Wh below the GRU), with better-calibrated 80 % intervals (79 % coverage vs 76–78 %; narrower at 60 min). Future weather (oracle) adds nothing. Same failure mode: best on readings ≤ 300 Wh (14.2 / 19.6 Wh), worst on spikes (234 / 334 Wh vs 215 / 321 GRU, 204 / 296 ARX); worst hours 17 h and 8 h at 10 min. Caveats: single seed, two learning rates, not a fair comparison (120M params, pretraining, 7 d context).
+- **Remaining failure: spikes** (`spike_breakdown` cell; test, 60 min MAE, readings ≤ 300 Wh = 95.7 % / > 300 Wh = 4.3 %):
+  - ≤ 300 Wh: GRU 22.0, MLP residual 22.4, ARX 28.6, persistence 34.7, Chronos-2 LoRA 19.6.
+  - > 300 Wh: GRU 321, MLP residual 320, ARX 296, persistence 296, Chronos-2 LoRA 334.
+  - Worst hours 17–18 h for the nets (17 h and 8 h for Chronos-2 at 10 min). Residual nets underpredict on average (bias +6 / +12 Wh).
 - **Hardware:** Ornella's original MLP numbers (37.5 ± 2.5 at 10 min) differ slightly from this run. The inputs are proven identical, so the difference comes from CPU hardware.
 
 ## Open items
 
-- **Re-run the whole notebook on Colab (GPU)** with the Chronos-2 section. Afterwards, write from the outputs: the GRU sentence in item 4 of "Quando falha" (spike table), the "Resultados e conclusões do extra" cell of the Chronos-2 section, item 5 of "Quando falha" (Chronos-2 on spikes), and the Chronos-2 numbers here.
+- All result prose is written from the 2026-11-12 Colab run (GRU, final summary, Chronos-2 conclusions, "Quando falha" items 4–5). Two Chronos cells had their last expression inside an `if` block (not auto-displayed by IPython); they are now wrapped in `display()` and will show on the next run (zero-shot quantile table, Chronos-2 hourly bias).
 - The Colab `outputs/` CSVs are git-ignored, so `git add .` from Colab does not bring them back; the executed notebook does carry the printed tables.
+- Remaining deliverables outside the notebook: the 10–12 minute presentation. The report has a first version (2026-11-12) in `src/report/`.
+  - It has not been compiled to PDF yet, so the page count is unchecked.
+  - Ornella's NUSP is still a placeholder.
+  - The train/val MAE of `mlp_res` and `cnn_res` is missing; it needs those Colab CSVs.
+  - The Chronos-2 and GIFT-Eval bib entries need to be checked.
+- Notebook prose vs. outputs: the representation-fold MASE for `variacoes` is 1.154 in the printed output, but the markdown in cell 115 (and this file) says 1.174. The CNN round-1 test numbers above (83.78 / 91.37) are older than the printed final run (83.56 / 91.14).
 - Possible next steps: something targeting the spikes (e.g. a quantile loss on the GRU, now that Chronos-2 gives quantiles for comparison).
 
 ## Working notes
