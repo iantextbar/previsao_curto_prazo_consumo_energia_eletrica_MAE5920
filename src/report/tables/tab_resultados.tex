@@ -1,0 +1,19 @@
+\begin{tabular}{@{}lcccccccc@{}}
+\toprule
+ & \multicolumn{2}{c}{MAE treino} & \multicolumn{2}{c}{MAE validação} & \multicolumn{2}{c}{MAE teste} & \multicolumn{2}{c}{RMSE teste} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(l){8-9}
+Modelo & 10 & 60 & 10 & 60 & 10 & 60 & 10 & 60 \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Rodada 1}} \\
+Persistência & 30,8 & 60,3 & 26,8 & 53,3 & 26,5 & 46,0 & 66,5 & 101,3 \\
+ARX & 31,6 & 50,1 & 27,4 & 42,9 & 27,1 & 40,3 & 59,4 & 78,4 \\
+MLP & 28,9 & 40,4 & 26,8 & 38,1 & 36,5 (3,3) & 52,4 (5,6) & 66,1 & 86,4 \\
+CNN 1D & 33,8 & 41,6 & 35,0 & 43,1 & 83,6 (18,5) & 91,1 (11,7) & 122,1 & 130,2 \\
+\multicolumn{9}{@{}l}{\emph{Rodada 2}} \\
+MLP (residual) & --- & --- & 24,6 & 37,6 & 24,2 (0,2) & 35,4 (0,8) & 60,1 & 81,1 \\
+CNN 1D (residual) & --- & --- & --- & --- & 25,0 (0,2) & 37,3 (0,8) & 60,9 & 83,1 \\
+ARX + MLP & 25,9 & 35,2 & 25,2 & 38,1 & 24,6 (0,4) & 35,5 (0,8) & 59,3 & 81,7 \\
+LSTM & 27,8 & 39,4 & 24,6 & 36,7 & 24,2 (0,1) & 35,4 (1,2) & 61,1 & 83,7 \\
+\textbf{GRU} & 27,7 & 40,8 & 24,3 & 36,3 & 23,7 (0,3) & 35,0 (0,8) & 60,6 & 81,1 \\
+\bottomrule
+\end{tabular}

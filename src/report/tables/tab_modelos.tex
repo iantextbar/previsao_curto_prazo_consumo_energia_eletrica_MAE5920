@@ -1,0 +1,12 @@
+\begin{tabular}{@{}lp{4.6cm}p{3.6cm}rrr@{}}
+\toprule
+Modelo & Entrada & Arquitetura & Parâm. & Treino (s) & Inf. (ms) \\
+\midrule
+ARX (Ridge) & defasagens $y_{t-11..t}$, $y_{t+h-144}$, exógenas em $t$ & linear, um modelo por horizonte & --- & --- & --- \\
+MLP & 49 variáveis (12 defasagens em $\log(1+y)$, estat. móveis, sensores, calendário) & 2 camadas ocultas de 128, dropout 0,2 & 23\,686 & 7,3 & 1,0 \\
+CNN 1D & janela de 6 passos $\times$ 36 canais & 2 conv.\ (32 filtros, kernel 3), dropout 0,2 & 7\,750 & 8,3 & 2,0 \\
+ARX + MLP & entradas do MLP + previsões do ARX & MLP sobre os resíduos do ARX (perda L1) & 23\,426 & 7,7 & 0,9 \\
+GRU & janela de 72 passos (12 h) $\times$ 30 variáveis + calendário do alvo & 2 camadas de 128, dropout 0,1 & 160\,786 & 10,0 & 22,9 \\
+LSTM & idem GRU & idem GRU & 214\,290 & 11,5 & 28,7 \\
+\bottomrule
+\end{tabular}
