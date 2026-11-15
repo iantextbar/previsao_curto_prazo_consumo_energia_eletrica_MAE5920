@@ -66,6 +66,7 @@ Course project for **MAE5920 – Deep Learning** (USP, Prof. Dr. Hamed Yazdanpan
    - **Helpers:** `arx_inputs(representation, train_index)`, `build_arx(inputs, parts, horizon, p, q, lag24)`, `arx_grid`, `best_arx`, `fit_arx`, `plot_arx_search`.
    - Ridge is fit directly in Wh. Its predictions don't depend on the target's scale, so this is equivalent to fitting on a standardized target.
    - **Best configuration (unchanged):** p = 12, q = 0, with the 24 h lag; alpha 100 for 10 min and 1000 for 60 min.
+   - **Multicollinearity diagnostic** (cell after the ARX results; helper `arx_design` now returns the named design matrix and `build_arx` uses it): 46 regressors, median VIF 4.2, 14 above 10, condition number 81. The core is the weather block (air temp VIF 369, dew point 287, air humidity 111); consumption lags only ≈ 4. At 10 min, α = 100 keeps 42.6 of 46 effective df (≈ OLS; val 27.45 vs 27.55). At 60 min, α = 1000 gives 32.1 df; OLS puts +38 / −35 / +25 Wh per SD on temp / dew point / humidity, Ridge −0.6 / −0.9 / +2.3; val 42.9 vs 45.5. Sign stability over the three expanding fits: Ridge 85 % vs OLS 72 % (60 min). Temp × dew-point correlation drops 0.82 → 0.42 / 0.46 (val / test); as a diagnostic only, OLS 60 min goes 45.5 → 46.8 on test (worse than persistence) while Ridge goes 42.9 → 40.3.
 5. **MLP and CNN 1D (Ornella's models, refactored).**
    - **Inputs:**
      - `build_features(frame, L, representation, lag24)`;
