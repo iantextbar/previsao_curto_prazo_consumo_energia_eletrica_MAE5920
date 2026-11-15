@@ -8,12 +8,15 @@
 \usepackage{amsmath}
 \usepackage{graphicx}
 \usepackage{booktabs}
-\usepackage[font=small,labelfont=bf]{caption}
+\usepackage[font=small,labelfont=bf,justification=raggedright,singlelinecheck=false]{caption}
 \usepackage[authoryear,round]{natbib}
 \usepackage[hidelinks]{hyperref}
 
+\captionsetup[table]{position=above,skip=6pt}
+\captionsetup[figure]{position=below,skip=6pt}
+
 \title{Previsão de curto prazo do consumo residencial de energia elétrica\\com redes neurais}
-\author{Ian Teixeira Barreiro (10717526) \and Ornella Scardua Ferreira (\textbf{[NUSP]})\\[4pt]
+\author{Ian Teixeira Barreiro (10717526) \and Ornella Scardua Ferreira (13463234)\\[4pt]
 \small MAE5920 -- Deep Learning, IME-USP. Prof.\ Dr.\ Hamed Yazdanpanah}
 \date{Novembro de 2026}
 
@@ -21,7 +24,7 @@
 \maketitle
 
 \begin{abstract}
-Prevemos o consumo dos eletrodomésticos de uma casa, a cada 10 minutos, com horizontes de 10 e 60 minutos. Comparamos a persistência, um modelo autorregressivo com variáveis exógenas (ARX), um MLP, uma CNN 1D e uma GRU, todos avaliados nas mesmas origens de previsão. Na primeira rodada, as redes que previam o nível do consumo foram bem na validação e falharam no teste, por uma mudança na distribuição das entradas: o período de teste é muito mais quente que o de treino. Uma cabeça residual, que faz a rede partir da persistência, resolveu o problema. Com ela, a GRU teve MAE de teste de 23,7 e 35,0~Wh, contra 27,1 e 40,3~Wh do ARX. Os picos de consumo continuam sendo o principal modo de falha de todos os modelos, inclusive de um modelo de fundação (Chronos-2) avaliado como extra.
+Prevemos, com 10 e 60 minutos de antecedência, o consumo de energia dos eletrodomésticos de uma residência, registrado em intervalos de 10 minutos. Comparamos a persistência, um modelo autorregressivo com variáveis exógenas (ARX), um MLP, uma CNN 1D e uma GRU, todos avaliados nas mesmas origens de previsão. Na primeira rodada, o MLP e a CNN 1D que previam diretamente o nível do consumo tiveram erros maiores no teste do que na validação. Essa piora coincidiu com uma mudança na distribuição das entradas, especialmente nas temperaturas, que foram mais altas no período de teste. Na segunda rodada, a cabeça residual, que usa a persistência como ponto de partida, reduziu o erro das duas redes no teste. Uma cabeça residual, que faz a rede partir da persistência, reduziu substancialmente o erro no período avaliado. Com ela, a GRU teve MAE de teste de 23,7 e 35,0~Wh, contra 27,1 e 40,3~Wh do ARX. Os picos de consumo continuam sendo o principal modo de falha de todos os modelos, inclusive de um modelo de fundação (Chronos-2) avaliado como extra.
 \end{abstract}
 
 % ===========================================================================
@@ -36,13 +39,15 @@ O trabalho teve duas rodadas. Na rodada~1, as redes perderam para a persistênci
 
 A base tem 19\,735 observações a cada 10 minutos, de 11/01/2016 17h00 a 27/05/2016 18h00, sem lacunas nem valores faltantes. Além do consumo dos eletrodomésticos (\texttt{Appliances}, em Wh), há o consumo das luzes e a temperatura e a umidade de nove sensores: oito cômodos e um do lado de fora do prédio (\texttt{T6}, \texttt{RH\_6}). Há também seis variáveis meteorológicas da estação de Chièvres e duas variáveis aleatórias (\texttt{rv1}, \texttt{rv2}), incluídas pelos autores para testar seleção de variáveis.
 
-O consumo é muito assimétrico (Figura~\ref{fig:eda}b): a mediana é 60~Wh, a média é 98~Wh, o percentil~95 é 330~Wh e o máximo é 1\,080~Wh. O perfil diário (Figura~\ref{fig:eda}a) é baixo de madrugada, sobe pela manhã e tem um pico às 18h em todos os dias da semana. Segundas e sextas têm consumo alto à tarde, talvez por trabalho em casa, e terças, quartas, quintas e domingos têm tardes mais calmas. Esse padrão diário e semanal motivou as variáveis de calendário.
+O consumo é muito assimétrico (Figura~\ref{fig:eda}b): a mediana é 60~Wh, a média é 98~Wh, o percentil~95 é 330~Wh e o máximo é 1\,080~Wh. O consumo médio (Figura~\ref{fig:eda}a) é baixo de madrugada, sobe pela manhã
+e atinge o máximo às 18h em seis dias da semana. Na segunda-feira, o máximo
+ocorre às 17h. Segundas e sextas têm consumo alto à tarde; e terças, quartas, quintas e domingos têm tardes mais calmas. Esse padrão diário e semanal motivou as variáveis de calendário.
 
 Entre as demais variáveis, o banheiro é o cômodo mais úmido, e a casa é em média 13,4~°C mais quente que o lado de fora. As temperaturas dos cômodos são fortemente correlacionadas entre si, e a umidade externa (\texttt{RH\_6}) tem correlação negativa com as temperaturas internas. O ponto mais importante para a modelagem é a tendência sazonal: as temperaturas sobem de janeiro a maio (Figura~\ref{fig:protocolo}). Por isso, o teste, em maio, tem entradas fora da faixa vista no treino.
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/fig1_eda}
+  \includegraphics[width=\linewidth,keepaspectratio]{figures/fig1_eda}
   \caption{(a) Consumo médio dos eletrodomésticos por hora e dia da semana, na série completa. (b) Distribuição do consumo em escala logarítmica. Os valores são múltiplos de 10~Wh, o que explica as lacunas entre as barras.}
   \label{fig:eda}
 \end{figure}
@@ -52,13 +57,13 @@ Entre as demais variáveis, o banheiro é o cômodo mais úmido, e a casa é em 
 
 \paragraph{Variáveis.} Renomeamos as colunas (por exemplo, \texttt{T1} vira \texttt{kitchen\_temp}) e removemos \texttt{rv1} e \texttt{rv2}. A hora do dia entra com codificação cíclica, $\sin(2\pi m/1440)$ e $\cos(2\pi m/1440)$ com $m$ em minutos, para que 23h50 fique próximo de 00h00. O dia da semana entra em \emph{one-hot}. As variáveis meteorológicas exigiram um cuidado: na base original, observações horárias foram interpoladas linearmente para 10 minutos, então o valor das 17h10 já contém parte da observação das 18h, ainda não disponível às 17h10. Para evitar esse vazamento, usamos em cada instante o valor da última hora cheia. Nas redes, o consumo entra em escala $\log(1+y)$, e o MLP recebe também a média móvel de 1~h e o desvio-padrão móvel de 6~h do consumo. Definimos ainda uma representação alternativa (\emph{variações}) para as 21 temperaturas e umidades: a variação em 10 e em 60 minutos e o desvio em relação à média das últimas 24~h, todas calculadas só com o passado.
 
-\paragraph{Divisão temporal.} A divisão é cronológica, 70/15/15, com cortes à meia-noite. O treino vai de 11/01 a 15/04 (96 dias, 13\,716 linhas), a validação de 16/04 a 06/05 (21 dias, 3\,018) e o teste de 07/05 a 27/05 (21 dias, 2\,983). Preferimos 15\% de validação a 10\% porque o consumo médio semanal varia de cerca de 75 a 120~Wh, e duas semanas deixariam a seleção sensível a uma semana atípica. As respostas $y_{t+1}$ e $y_{t+6}$ são criadas dentro de cada conjunto, de modo que nenhum valor de validação ou teste é usado como resposta no treino.
+\paragraph{Divisão temporal.} A divisão é cronológica, 70/15/15, com cortes à meia-noite. O treino vai de 11/01 a 15/04, a validação de 16/04 a 06/05 e o teste de 07/05 a 27/05. Após excluir as seis últimas origens de cada conjunto, restam 13.716, 3.018 e 2.983 origens com alvos disponíveis nos dois horizontes, respectivamente. Preferimos 15\% de validação a 10\% porque o consumo médio semanal varia de cerca de 75 a 120~Wh, e duas semanas deixariam a seleção sensível a uma semana atípica. As respostas $y_{t+1}$ e $y_{t+6}$ são criadas dentro de cada conjunto, de modo que nenhum valor de validação ou teste é usado como resposta no treino.
 
 \paragraph{Prevenção de vazamento.} Além da correção do clima, adotamos as seguintes medidas:
 \begin{itemize}\setlength\itemsep{0pt}
   \item a padronização (\texttt{StandardScaler}) é ajustada só nas linhas de treino e reajustada em cada dobra da validação temporal;
   \item a ACF e a PACF, usadas para escolher as defasagens do ARX, são calculadas só no treino;
-  \item as defasagens e janelas são construídas sobre a série contínua e só depois separadas por conjunto. Uma origem de teste pode usar o histórico do fim da validação, informação que existiria em produção, e todos os modelos são avaliados exatamente nas mesmas origens;
+  \item as defasagens e janelas são construídas sobre a série contínua e só depois separadas por conjunto. Uma origem de teste pode usar o histórico do fim da validação, informação que existiria em produção, e todos os modelos são avaliados exatamente nas mesmas origens na validação e no teste;
   \item hiperparâmetros e parada antecipada usam a validação, nunca o teste.
 \end{itemize}
 
@@ -66,9 +71,9 @@ Entre as demais variáveis, o banheiro é o cômodo mais úmido, e a casa é em 
 
 \paragraph{Seleção de modelos: dois protocolos.} Na rodada~1, os hiperparâmetros foram escolhidos pelo MAE na validação. Depois do resultado de teste da rodada~1 (Seção~\ref{sec:r1}), passamos a escolher entre alternativas com uma validação com janelas expansivas (\emph{forward chaining}) \citep{tashman2000,bergmeir2012}, sem tocar no teste. O período de treino e validação foi dividido em três blocos de avaliação de 21 dias (Figura~\ref{fig:protocolo}), e o último é a validação oficial. Em cada dobra, o treino é tudo o que vem antes do bloco, as padronizações são reajustadas e as redes usam os últimos 7 dias do treino da dobra para a parada antecipada. As regras de decisão foram escritas antes de rodar as dobras: vence a alternativa com o menor MASE médio entre dobras e horizontes.
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/fig2_protocolo}
+  \includegraphics[width=\linewidth,keepaspectratio]{figures/fig2_protocolo}
   \caption{Temperatura média diária interna e externa, com a divisão em treino, validação e teste e os três blocos de avaliação da validação com janelas expansivas. No teste, a temperatura interna fica quase todo o tempo acima do máximo visto no treino.}
   \label{fig:protocolo}
 \end{figure}
@@ -96,8 +101,10 @@ e assim parte da persistência, o que limita o efeito de extrapolações. A segu
 
 \paragraph{GRU.} O modelo principal é uma GRU \citep{cho2014} unidirecional. Ela recebe uma janela de $L$ passos com 30 variáveis (consumo em $\log(1+y)$, luzes, sensores, clima e seno e cosseno da hora e do dia da semana). O último estado oculto é concatenado ao calendário dos instantes previstos e passa por uma camada linear com cabeça residual. O treino usa a perda L1, coerente com o MAE, \emph{clipping} do gradiente em 1,0 e AdamW. A busca em grade cobriu $L \in \{36, 72, 144\}$ (6, 12 e 24~h), estado oculto de 32, 64 ou 128, 1 ou 2 camadas e dropout de 0,1 ou 0,2, num total de 36 configurações. A escolhida tem $L=72$, duas camadas de 128 e dropout de 0,1. A busca foi pouco sensível: as 10 melhores configurações ficaram a menos de 0,5~Wh umas das outras na média dos dois horizontes. Um único modelo para os dois horizontes foi melhor que modelos separados (29,8 contra 30,1~Wh na validação). Como ablação, treinamos uma LSTM \citep{hochreiter1997} com a mesma configuração. A Tabela~\ref{tab:modelos} resume os modelos e seu custo.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering\small
+  \setlength{\tabcolsep}{3pt}
+  \renewcommand{\arraystretch}{1.12}
   \caption{Configurações finais e custo computacional (média de 5 sementes; GRU e LSTM em GPU, as demais redes em CPU). Inferência: uma passagem pelas 2\,983 origens do teste.}
   \label{tab:modelos}
   \input{tables/tab_modelos}
@@ -106,12 +113,16 @@ e assim parte da persistência, o que limita o efeito de extrapolações. A segu
 % ===========================================================================
 \section{Resultados}
 
+Os resultados da Tabela~\ref{tab:resultados} foram obtidos na execução de 12/11/2026 no Google Colab, registrada no \href{https://github.com/iantextbar/previsao_curto_prazo_consumo_energia_eletrica_MAE5920/blob/96d6e47/src/notebooks/previsao_curto_prazo_consumo_energia_eletrica.ipynb}{notebook do projeto}. Os valores entre parênteses na tabela indicam o desvio-padrão do MAE de teste entre as cinco sementes.
+
 \subsection{Rodada 1: bom na validação, ruim no teste}\label{sec:r1}
 
-Na validação, o MLP empatou com a persistência a 10 minutos e superou o ARX a 60 minutos (38,1 contra 42,9~Wh; Tabela~\ref{tab:resultados}). No teste, as duas redes ficaram atrás da persistência e do ARX, com grande variação entre sementes. O resíduo médio foi negativo, ou seja, as redes superestimaram o consumo: $-11$ e $-16$~Wh para o MLP e $-63$ e $-64$~Wh para a CNN 1D, enquanto o ARX e a persistência ficaram praticamente sem viés. A causa mais provável é a mudança na distribuição das entradas \citep{quinonero2009}. Padronizada com as estatísticas de treino, a temperatura da cozinha tem média de 0,75 na validação e 2,55 no teste, enquanto a distribuição do consumo pouco muda entre os conjuntos. Fora da faixa de treino, cada rede com ReLU extrapola de um jeito, o que também explica a variação entre sementes. O ARX, linear e com coeficientes encolhidos, extrapola de forma mais contida.
+Na validação, o MLP empatou com a persistência a 10 minutos e superou o ARX a 60 minutos (38,1 contra 42,9~Wh; Tabela~\ref{tab:resultados}). Na mesma validação, a CNN 1D teve MAE maior que o ARX nos dois horizontes. No teste, as duas redes ficaram atrás da persistência e do ARX, com grande variação entre sementes. O resíduo médio foi negativo, ou seja, as redes superestimaram o consumo: $-11$ e $-16$~Wh para o MLP e $-63$ e $-64$~Wh para a CNN 1D, enquanto o ARX e a persistência ficaram praticamente sem viés. A causa mais provável é a mudança na distribuição das entradas \citep{quinonero2009}. Padronizada com as estatísticas de treino, a temperatura da cozinha tem média de 0,75 na validação e 2,55 no teste, enquanto a distribuição do consumo pouco muda entre os conjuntos. Fora da faixa de treino, cada rede com ReLU extrapola de um jeito, o que também explica a variação entre sementes. O ARX, linear e com coeficientes encolhidos, extrapola de forma mais contida.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering\small
+  \setlength{\tabcolsep}{4pt}
+  \renewcommand{\arraystretch}{1.12}
   \caption{MAE (Wh) em treino, validação e teste e RMSE (Wh) no teste, para os horizontes de 10 e 60 minutos. Redes: média de 5 sementes, com o desvio-padrão do teste entre parênteses. ``---'': valor não registrado na execução final do notebook.}
   \label{tab:resultados}
   \input{tables/tab_resultados}
@@ -123,8 +134,10 @@ Antes das dobras, o teste KPSS \citep{kpss1992} no treino rejeitou a estacionari
 
 Nas mesmas dobras, a cabeça residual foi a mudança decisiva. O MASE médio caiu de 0,971 para 0,770 no MLP e de 1,454 para 0,792 na CNN 1D, nas três dobras e nos dois horizontes. A defasagem de 24~h praticamente não alterou o resultado. O ARX + MLP reduziu o MASE do ARX de 0,841 para 0,831 e foi considerado útil pela regra.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering\small
+  \setlength{\tabcolsep}{5pt}
+  \renewcommand{\arraystretch}{1.12}
   \caption{MASE médio nas três dobras da validação com janelas expansivas (menor é melhor). Em negrito, as alternativas escolhidas pelas regras fixadas antes de rodar as dobras.}
   \label{tab:dobras}
   \input{tables/tab_dobras}
@@ -132,13 +145,16 @@ Nas mesmas dobras, a cabeça residual foi a mudança decisiva. O MASE médio cai
 
 \subsection{Comparação final}
 
-Com a cabeça residual, as redes passaram do último para o primeiro lugar (Tabela~\ref{tab:resultados}). A GRU teve o menor MAE de teste nos dois horizontes: 23,7 e 35,0~Wh, ou MASE de 0,77 e 0,58. Em relação ao ARX, o MAE caiu 12\% e 13\%, e em relação à persistência, 11\% e 24\%. A vantagem da GRU sobre o MLP residual, porém, é de apenas 0,5 e 0,3~Wh, da ordem da variação entre sementes: a maior parte do ganho vem da cabeça residual, e não da arquitetura recorrente. O desvio-padrão entre sementes caiu de 3,3~Wh (MLP da rodada~1, 10 minutos) para 0,1 a 0,8~Wh, e o MAE de teste ficou próximo do de validação, o que indica que a âncora na persistência neutralizou a mudança de distribuição.\footnote{A GRU e a LSTM variam levemente entre execuções em GPU, mesmo com o cuDNN em modo determinístico; numa execução anterior, a GRU teve 23,6 e 34,9~Wh. A diferença é menor que a variação entre sementes.}
+Com a cabeça residual, as redes reduziram o erro no teste
+(Tabela~\ref{tab:resultados}). A GRU teve o menor MAE da comparação
+principal, de 23,7 e 35,0~Wh aos 10 e 60 minutos, respectivamente.
+Esses valores correspondem a MASE de 0,77 e 0,58. Em relação ao ARX, o MAE caiu 12\% e 13\%, e em relação à persistência, 11\% e 24\%. A vantagem da GRU sobre o MLP residual foi de cerca de 0,5 e 0,3~Wh nos dois horizontes. As ablações da seção anterior mostraram reduções maiores com a cabeça residual. Entre as cinco sementes, o desvio-padrão do MAE a 10 minutos caiu de 3,3 para 0,2~Wh no MLP e de 18,5 para 0,2~Wh na CNN 1D. Os MAEs de teste da GRU e do MLP residual ficaram próximos dos valores de validação.\footnote{A GRU e a LSTM variam levemente entre execuções em GPU, mesmo com o cuDNN em modo determinístico. Em uma execução anterior, a GRU teve MAE de 23,6 e 34,9~Wh. A diferença é menor que a variação entre sementes.}
 
-Em RMSE, o ARX continua competitivo (59,4 e 78,4~Wh, contra 60,6 e 81,1~Wh da GRU), o que já indica erros maiores das redes nos picos. A Figura~\ref{fig:hora} mostra que o erro se concentra no pico da manhã e às 17--18h, e que a GRU fica abaixo do ARX na maior parte das horas. O teste de Ljung--Box rejeita a ausência de autocorrelação dos resíduos a 10 minutos para todos os modelos, de modo que ainda há estrutura não capturada. As redes residuais subestimam o consumo em média (resíduo médio de $+5{,}8$ e $+12{,}5$~Wh para a GRU). A GRU é também a mais cara: 161 mil parâmetros e 23~ms de inferência no teste, contra 24 mil e 1~ms do MLP.
+O ARX teve RMSE menor que o da GRU nos dois horizontes. Entre os modelos da Tabela~\ref{tab:resultados}, o menor RMSE foi de 59,3 Wh para o ARX + MLP aos 10 minutos e de 78,4 Wh para o ARX aos 60 minutos. A Figura~\ref{fig:hora} mostra que o erro se concentra no pico da manhã e às 17--18h, e que a GRU fica abaixo do ARX na maior parte das horas. O teste de Ljung--Box rejeita a ausência de autocorrelação dos resíduos a 10 minutos para todos os modelos, de modo que ainda há estrutura não capturada. As redes residuais subestimam o consumo em média (resíduo médio de $+5{,}8$ e $+12{,}5$~Wh para a GRU). Nesta execução, a GRU teve cerca de 161 mil parâmetros e levou 23 ms para processar o conjunto de teste em GPU. O MLP residual teve cerca de 24 mil parâmetros e levou 1 ms para processar o mesmo conjunto em CPU.
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/fig3_mae_hora}
+  \includegraphics[width=\linewidth,keepaspectratio]{figures/fig3_mae_hora}
   \caption{MAE no teste por hora do instante previsto (GRU: média de 5 sementes).}
   \label{fig:hora}
 \end{figure}
@@ -148,10 +164,12 @@ Em RMSE, o ARX continua competitivo (59,4 e 78,4~Wh, contra 60,6 e 81,1~Wh da GR
 
 Como complemento, fora da comparação principal, avaliamos o Chronos-2 \citep{chronos2}. É um \emph{transformer} pré-treinado para séries temporais, com cerca de 120 milhões de parâmetros, que prevê quantis e aceita covariáveis. Usamos as mesmas origens de teste dos outros modelos, o alvo em Wh, o calendário como covariável conhecida no futuro e os sensores e o clima como covariáveis só do passado. Cada origem foi prevista isoladamente, para que uma janela não visse outras posteriores. Testamos o modelo sem ajuste (\emph{zero-shot}) e com ajuste fino por LoRA \citep{hu2022} ($r=8$, $\alpha=16$). No ajuste, as janelas de treino vieram só do período de treino, e a taxa de aprendizado e o \emph{checkpoint} foram escolhidos pela perda quantílica (WQL) na validação. Não encontramos a base nos corpora públicos de pré-treinamento (\texttt{chronos\_datasets} e GIFT-Eval; \citealp{gifteval2024}).
 
-Com 12~h de contexto, o Chronos-2 empata com a persistência. Com 7 dias de contexto, sem nenhum treino nesta casa, atinge o nível da GRU (Tabela~\ref{tab:chronos}). O LoRA traz um ganho modesto e o menor MAE do trabalho a 60 minutos (33,3~Wh, 1,8~Wh abaixo da GRU), com intervalos de 80\% bem calibrados (79\% de cobertura). O clima futuro não ajuda. A comparação não é justa: o modelo tem 120 milhões de parâmetros contra 161 mil, foi pré-treinado em um grande corpus, usa 7 dias de contexto contra 12~h, foi treinado com uma única semente e levou cerca de 50 minutos de GPU por taxa de aprendizado.
+Com 12~h de contexto, o Chronos-2 sem ajuste empatou com a persistência aos 10 minutos e reduziu o MAE de 46,0 para 41,1~Wh aos 60 minutos. Com 7 dias de contexto, o modelo sem ajuste obteve MAE de 24,0 e 34,5~Wh aos 10 e 60 minutos, respectivamente (Tabela~\ref{tab:chronos}). O ajuste fino com LoRA reduziu esses valores para 23,6 e 33,3~Wh. Para essa versão, os intervalos de previsão com cobertura nominal de 80\% tiveram cobertura empírica de 79\% nos dois horizontes. A inclusão de dados meteorológicos futuros elevou o MAE aos 10 minutos e teve efeito desprezível aos 60 minutos. A comparação com a GRU é exploratória. O Chronos-2 tem 120 milhões de parâmetros, usa 7 dias de contexto e foi pré-treinado em um grande corpus. A GRU tem 161 mil parâmetros e usa 12~h de contexto. O ajuste fino com LoRA usou uma única semente e levou cerca de 50 minutos de GPU por taxa de aprendizado avaliada.
 
-\begin{table}[t]
+\begin{table}[!htbp]
   \centering\small
+  \setlength{\tabcolsep}{5pt}
+  \renewcommand{\arraystretch}{1.12}
   \caption{Chronos-2 no teste: MAE da mediana, cobertura do intervalo entre os quantis 0,1 e 0,9 (nominal de 80\%) e WQL. $^\dagger$Limite superior irreal: supõe o clima futuro conhecido.}
   \label{tab:chronos}
   \input{tables/tab_chronos}
@@ -160,14 +178,19 @@ Com 12~h de contexto, o Chronos-2 empata com a persistência. Com 7 dias de cont
 % ===========================================================================
 \section{Quando o modelo de aprendizagem profunda falha?}\label{sec:falha}
 
-\paragraph{Mudança na distribuição das entradas.} As redes que preveem o nível do consumo falham quando as entradas saem da faixa de treino, e a validação feita com dados do passado não reproduz essa situação. Nas nossas dobras, só 5\% a 10\% dos valores ficavam fora da faixa, contra quase todo o teste (Figura~\ref{fig:protocolo}). Por isso a troca de representação não se validou, embora atacasse justamente o problema. A cabeça residual mitiga a falha, mas não faz a rede entender a relação entre temperatura e consumo: um mês de verão, ainda mais quente, poderia afetar novamente as variáveis exógenas. Uma série que cubra pelo menos um ano evitaria essa extrapolação.
+\paragraph{Mudança na distribuição das entradas.} Na primeira rodada, o MLP e a CNN 1D que previam diretamente o nível do consumo tiveram erros maiores no teste do que na validação. Essa piora coincidiu com temperaturas mais altas no teste, como mostra a
+Figura~\ref{fig:protocolo}. Nas dobras, entre 5\% e 10\% dos valores
+das variáveis de temperatura e umidade ficaram fora dos respectivos
+intervalos de referência do treino de cada dobra. A representação
+alternativa, baseada nas variações dessas entradas, teve desempenho
+inferior na validação em dobras. A cabeça residual mitiga a falha, mas não faz a rede entender a relação entre temperatura e consumo: um mês de verão, ainda mais quente, poderia afetar novamente as variáveis exógenas. Uma série de pelo menos um ano ajudaria a cobrir mais condições sazonais. Ainda poderia haver extrapolação sob condições pouco representadas no treino.
 
-\paragraph{Picos de consumo.} O ganho das redes vem das leituras comuns. No teste a 60 minutos, nas leituras de até 300~Wh (95,7\% das observações), o MAE é de 22,0~Wh para a GRU, contra 28,6~Wh do ARX e 34,7~Wh da persistência. Nas leituras acima de 300~Wh (4,3\%), a GRU erra mais que os dois: 321~Wh, contra 296~Wh do ARX e da persistência. O Chronos-2 com LoRA segue o mesmo padrão, com o menor erro nas leituras comuns (19,6~Wh) e o maior nos picos (334~Wh). As perdas L1 e Huber sobre $\log(1+y)$ aproximam a mediana condicional, que não antecipa um evento raro e abrupto. A Figura~\ref{fig:dia} mostra o efeito: nenhum modelo prevê o pico das 18h, e a GRU só reage uma hora depois, quando o pico já passou. Prever esses picos, que respondem por boa parte do RMSE, exigiria outra formulação, como perdas quantílicas, um classificador de eventos ou informação sobre o uso dos aparelhos.
+\paragraph{Picos de consumo.} O ganho das redes vem das leituras comuns. No teste a 60 minutos, nas leituras de até 300~Wh (95,7\% das observações), o MAE é de 22,0~Wh para a GRU, contra 28,6~Wh do ARX e 34,7~Wh da persistência. Nas leituras acima de 300~Wh (4,3\%), a GRU erra mais que os dois: 321~Wh, contra 296~Wh do ARX e da persistência. O Chronos-2 com LoRA segue o mesmo padrão, com o menor erro nas leituras comuns (19,6~Wh) e o maior nos picos (334~Wh). Esse resultado mostra que o menor MAE da GRU no teste se concentrou nas leituras de até 300~Wh. No dia ilustrado na Figura~\ref{fig:dia}, as previsões pontuais da GRU e do ARX ficaram abaixo do pico observado no fim da tarde. Prever esses picos, que respondem por boa parte do RMSE, exigiria outra formulação, como perdas quantílicas, um classificador de eventos ou informação sobre o uso dos aparelhos.
 
-\begin{figure}[t]
+\begin{figure}[!htbp]
   \centering
-  \includegraphics[width=\textwidth]{figures/fig4_dia_teste}
-  \caption{Um dia do teste, horizonte de 60 minutos: consumo observado, previsões da GRU (média de 5 sementes) e do ARX e intervalo de 80\% do Chronos-2 \emph{zero-shot} com 7 dias de contexto. Os picos só aparecem nas previsões depois de terem ocorrido.}
+  \includegraphics[width=\linewidth,keepaspectratio]{figures/fig4_dia_teste}
+  \caption{Um dia do teste, horizonte de 60 minutos: consumo observado, previsões da GRU (média de 5 sementes) e do ARX e intervalo de 80\% do Chronos-2 \emph{zero-shot} com 7 dias de contexto. A figura ilustra um dia de teste com um pico de consumo no fim da tarde.}
   \label{fig:dia}
 \end{figure}
 
@@ -175,12 +198,13 @@ Com 12~h de contexto, o Chronos-2 empata com a persistência. Com 7 dias de cont
 \begin{itemize}\setlength\itemsep{0pt}
   \item a análise exploratória usou a série completa, incluindo o teste, e foi ela que revelou a tendência sazonal;
   \item a rodada~2 (cabeça residual, defasagem de 24~h, ARX + MLP) e a GRU foram desenvolvidas depois de vermos o resultado de teste da rodada~1. As escolhas foram feitas por regras fixadas antes, em dobras que não tocam o teste, mas a decisão de procurar uma correção foi motivada pelo teste. Os resultados de teste da rodada~2 devem, portanto, ser lidos como levemente otimistas;
-  \item o teste cobre só três semanas de uma única casa, e as diferenças de menos de 1~Wh entre as redes residuais estão dentro da variação entre sementes.
+  \item o teste cobre três semanas de uma única residência. A diferença de MAE entre a GRU e o MLP residual foi de aproximadamente 0,5 Wh aos 10 minutos e 0,3 Wh aos 60 minutos.
 \end{itemize}
 
-\paragraph{Conclusão.} Em previsão de curtíssimo prazo, a persistência é uma referência forte, e a escolha mais importante foi ancorar as redes nela. Com a cabeça residual, todas as redes superaram a persistência e o ARX, e a GRU foi a melhor, por pouco. Os limites estão na mudança de distribuição, que só uma série mais longa resolveria, e nos picos de consumo, que nenhum dos modelos, incluindo um modelo de fundação, antecipa. O bom desempenho do Chronos-2 com uma semana de contexto e nenhum treino nesta casa sugere que ele deveria entrar como referência em comparações futuras.
+\paragraph{Conclusão.}
+Neste estudo, o MLP e a CNN 1D que previam diretamente o nível de consumo perderam para a persistência e o ARX no teste, em um período mais quente que o de treino. A cabeça residual reduziu o erro das duas redes nas dobras temporais e no teste de maio. Entre os modelos da comparação principal, a GRU teve o menor MAE médio, com vantagem inferior a 0,5~Wh sobre o MLP residual nos dois horizontes. Aos 60 minutos, a GRU teve menor MAE que o ARX e a persistência nas leituras de até 300~Wh. Acima desse limiar, o ARX e a persistência tiveram menor erro. Como o resultado de maio motivou a segunda rodada, a confirmação desses ganhos exige avaliação em outro período.
 
-\bibliographystyle{plainnat}
+\bibliographystyle{plainnat-ptbr}
 \bibliography{refs}
 
 \end{document}
